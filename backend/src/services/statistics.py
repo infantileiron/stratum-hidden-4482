@@ -1,0 +1,8 @@
+import math
+from src.services.forward_backward import forward_backward
+from src.services.viterbi import viterbi
+def analyze(snapshot,checksum):
+ rows=snapshot['rows'];model=snapshot['model'];c=model['config'];states=c['states'];values=[r['value'] for r in rows];args=(values,c['initial'],c['transition'],[s['mean'] for s in states],[s['variance'] for s in states]);fb=forward_backward(*args);vi=viterbi(*args);out=[]
+ for i,row in enumerate(rows):
+  posterior=fb['posterior'][i];point=fb['point_map'][i];path=vi['path'][i];out.append({**row,'posterior':posterior,'point_state_index':point,'point_state':states[point]['id'],'path_state_index':path,'path_state':states[path]['id'],'max_posterior':max(posterior),'entropy_bits':-math.fsum(p*math.log2(p) for p in posterior if p>0),'different':point!=path,'backpointers':vi['backpointers'][i]})
+ counts={s['id']:sum(r['path_state']==s['id'] for r in out) for s in states};return {'rows':out,'point_count':len(rows),'borehole':snapshot['borehole'],'depth_start':rows[0]['depth_m'],'depth_end':rows[-1]['depth_m'],'depth_step_m':1.,'model':model,'forward_backward':fb,'viterbi':vi,'path_log_posterior':vi['relative_log_joint_density']-fb['relative_log_likelihood'],'path_counts':counts,'point_path_disagreements':sum(r['different'] for r in out),'mean_max_posterior':math.fsum(r['max_posterior'] for r in out)/len(out),'path_changes':sum(a['path_state']!=b['path_state'] for a,b in zip(out,out[1:])),'checksum':checksum,'source':snapshot['source'],'limitations':['高斯HMM为已配置模型，不从truth学习；标签是隐状态，不是真实地层','后验使用整段未来观测，属于离线平滑；Viterbi是整条路径MAP','固定完整1米孔段，不跨缺采样串链；模拟参考列不参与推断','后验是给定模型下概率，不是岩性确认或地质安全判断']}

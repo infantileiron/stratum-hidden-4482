@@ -1,0 +1,34 @@
+import random
+from src.utils import repository as repo
+from src.utils.identity import now
+from src.utils.security import hash_password
+from src.services.statistics import analyze
+from src.services.study import lock_snapshot
+def demo_config():return {'states':[{'id':'S1','name':'低响应态','mean':45.,'variance':16.},{'id':'S2','name':'中响应态','mean':70.,'variance':25.},{'id':'S3','name':'高响应态','mean':98.,'variance':16.}],'initial':[.6,.3,.1],'transition':[[.94,.05,.01],[.04,.92,.04],[.01,.06,.93]]}
+def demo_rows():
+ rng=random.Random(2409);c=demo_config();rows=[]
+ def choose(weights):
+  u=rng.random();total=0
+  for i,p in enumerate(weights):
+   total+=p
+   if u<=total:return i
+  return len(weights)-1
+ for hole in ['SX-01','SX-02','SX-03']:
+  state=choose(c['initial'])
+  for i in range(160):
+   if i:state=choose(c['transition'][state])
+   s=c['states'][state];value=rng.gauss(s['mean'],s['variance']**.5)
+   if i in (39,83,121):value+=14 if state<2 else -14
+   rows.append({'borehole':hole,'depth_m':100.+i,'value':value,'truth':s['id']})
+ return rows
+def seed():
+ repo.init_db()
+ for role,name in [('admin','孔段复核地学编辑'),('analyst','测井序列分析员'),('viewer','地研档案阅览员')]:
+  email=f'{role}@shenxi.test';repo.put('users',{'id':email,'email':email,'name':name,'role':role,'password_hash':hash_password('Stratum2026!')},insert_only=True)
+ d={'id':'ds-boreholes','name':'沉溪三孔 · 1米完整测井','source':'shenxi_logs_202611.csv','rows':demo_rows(),'created_at':now()};repo.put('datasets',d,insert_only=True)
+ m={'id':'model-gaussian3','name':'三态高斯响应模型 · 人工命名v1','config':demo_config(),'revision':1,'created_at':now()};repo.put('state_models',m,insert_only=True)
+ snapshot,checksum=lock_snapshot(d,m,'SX-01');study={'id':'study-sequence','name':'SX-01完整160米孔段复核','dataset_id':d['id'],'model_id':m['id'],'borehole':'SX-01','snapshot':snapshot,'checksum':checksum,'created_at':now()};repo.put('studies',study,insert_only=True)
+ repo.put('runs',{'id':'run-demo','study_id':study['id'],'status':'completed','result':analyze(snapshot,checksum),'error':'','created_at':now()},insert_only=True)
+ repo.put('reviews',{'id':'review-demo','run_id':'run-demo','comment':'完整1米孔段、配置模型版本、点态后验与全路径MAP已分开核查。状态名是模型标签非地层真值。','status':'approved','reviewer':'admin@shenxi.test','created_at':now()},insert_only=True)
+ repo.put('reports',{'id':'report-demo','run_id':'run-demo','review_id':'review-demo','title':'沉溪SX-01模型隐状态序列复核册','created_at':now()},insert_only=True)
+ return {t:len(repo.all_rows(t)) for t in ('users','datasets','state_models','studies','runs','reviews','reports')}

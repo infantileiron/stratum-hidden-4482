@@ -1,0 +1,1 @@
+export const roleLabels:Record<string,string>={admin:'孔段复核地学编辑',analyst:'测井序列分析员',viewer:'地研档案阅览员'};export const statusLabels:Record<string,string>={queued:'排队中',running:'解码中',completed:'已完成',failed:'运行失败',pending:'待复核',approved:'已通过',rejected:'已退回'};

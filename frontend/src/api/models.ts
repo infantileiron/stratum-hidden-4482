@@ -1,0 +1,1 @@
+import {request} from './client';import type {StateModel} from '../types/entities';export const list=()=>request<StateModel[]>('/models');export const create=(data:unknown)=>request<StateModel>('/models','POST',data);export const update=(id:string,data:unknown)=>request<StateModel>('/models/'+id,'PATCH',data);
