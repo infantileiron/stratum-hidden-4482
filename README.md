@@ -1,12 +1,12 @@
 # 沉溪地研 · 钻孔隐状态序列复核
 
-为14人地学数据组锁定完整1米孔段与高斯HMM模型，分开核对点态平滑后验和Viterbi整条MAP路径，再由地学编辑批准归档。
+为14人地学数据组锁定完整1米孔段与高斯HMM模型，分开核对点态平滑后验和Viterbi整条MAP路径，再由地学编辑批准归档。地学编辑可把已复核深度的允许状态作为证据：为多个深度限定允许隐状态集合，整孔后验与最可能路径在同一证据下重算，零概率转移仍然有效；约束冲突时标出无法连通的孔段，失败结果不能提审。
 
 ## 真实场景与六实体
 
 上游 `shenxi_logs_202611.csv` 为SX-01/02/03三孔各160点模拟测井。团队原用表格逐点硬阈值划分，噪声造成状态跳变、点态概率与全路径被混为一谈、缺采样后直接串链。本工程替代完整性核查、模型登记/命名修订、孔段与模型快照、异步解码和复核；下游地研档案组读取批准的模型状态序列CSV。输出是给定模型下隐状态，不是真实地层或地质安全判断。
 
-BoreholeDataset测井、StateModel人工配置模型、SequenceStudy锁定孔段、DecodeRun运行、LayerReview复核、Report报告六实体贯穿。六页：孔段档案、完整测井、状态模型、锁定与解码、后验与路径、地学复核，另有登录。两页复用BoreholeTrack、SequenceSummary、ModelMatrix。
+BoreholeDataset测井、StateModel人工配置模型、SequenceStudy锁定孔段（含深度允许状态证据）、DecodeRun运行、LayerReview复核、Report报告六实体贯穿。六页：孔段档案、完整测井、状态模型、锁定与解码、后验与路径、地学复核，另有登录。两页复用BoreholeTrack、SequenceSummary、ModelMatrix；约束编辑与冲突诊断复用ConstraintEditor、ConstraintPanel、ConflictNotice。
 
 ## 快速启动
 
@@ -35,7 +35,8 @@ docker compose exec -T backend python -m scripts.seed_demo
 5. 09:20 提交Redis，独立Python worker运行对数域前向后向与Viterbi回溯，结果落PostgreSQL和共享JSON。
 6. 09:25 沿深度查看读数、三态后验、点态argmax与整条MAP，核查对数分数与回溯前驱。
 7. 09:30 模型后来修订为v2时，旧研究和报告仍引用v1，分析员提交地学复核。
-8. 09:40 编辑批准后下载CSV，保留孔段、旧模型名称/概率/参数、点态后验、路径与回溯。
+8. 09:35 编辑复核若干深度后，把这些深度的允许状态作为证据新建研究重算：后验与MAP共同遵守，零转移仍有效；若规则与零转移冲突，运行失败并标出无法连通孔段，不能提审。
+9. 09:40 编辑批准后下载CSV，保留孔段、旧模型名称/概率/参数、本次深度约束、点态后验、路径与回溯；旧批准报告不受新研究影响。
 
 ## 完整孔段与模型输入
 
@@ -59,6 +60,17 @@ CSV列borehole,depth_m,value，truth可选且仅作模拟参考。孔ID为1—30
 
 总MAP分数是路径与连续观测的联合对数密度，不是离散概率。返回log_joint_density；兼容键log_probability表示同一联合对数密度。整路径后验log P(path|观测)通过相对MAP分数减相对观测log密度得到，先抵消公共Gaussian offset，避免两个巨大数相减。UI和CSV明确区分这三种量，未将低似然指数化。
 
+## 复核深度允许状态证据
+
+地学编辑能查看整孔后验，也能把已复核深度的结论作为证据重新分析。研究锁定时可为多个1米采样深度各自限定允许状态集合（至少一个、状态ID须存在、每深度至多一条规则）。规则与读数、模型快照一起写入研究快照并参与SHA256，worker只读快照：
+
+- 约束以状态掩码实现：被禁止状态在该深度的相对发射分数置为−∞，前向后向与Viterbi共用同一掩码。因此整孔平滑后验在该深度对禁止状态给出精确0后验，Viterbi只在允许状态内回溯，点态argmax与整条MAP都遵守同一组证据。
+- 零概率转移不被平滑、不被约束覆盖。掩码只改发射证据，模型初始π与转移A原样参与logsumexp与max递推，精确0转移仍按−∞处理。
+- 提交解码前先做约束可达性诊断：分别计算约束掩码内的前向/后向布尔可达性，逐深度求交集。HMM无跳跃，约束与零转移不存在共同完整路径时整孔不可达；诊断同时给出无法连通孔段（起止深度与点数）、逐条约束的前向/后向可达状态、无约束前向可达参照和首个断裂点（初始零概率、无前缀路径、无后续延续三类原因）。
+- 冲突运行状态为failed，错误信息与结构化诊断写入运行载荷，不生成共享JSON导出物；复核服务拒绝failed运行提审，报告服务也无法引用，失败结果不进入归档。
+- 复核规则更新必须新建研究：旧研究insert-only快照、旧批准复核与已生成报告全部保留，新研究凭新约束得到新校验和与新状态序列。研究可记录约束证据来源运行（须同数据集、同孔段且已完成），仅作溯源。
+- 页面在锁定与解码页编辑约束，在后验与路径页用菱形标注约束深度、给出约束与点态/路径遵守核对表；冲突时展示无法连通孔段与断裂原因。CSV导出含约束证据段（深度、允许状态ID与人工名称、来源运行）及逐深度constraint_applied、allowed_states、点态/路径是否遵守列，页面与导出可核对同一次约束及对应状态序列。
+
 ## 版本、快照与报告
 
 StateModel修订PATCH递增revision；研究保存完整孔段读数、truth参考、状态ID/人工名称/参数/初始/转移/修订号及源文件的规范JSON SHA256。worker仅读研究快照，后续模型编辑或数据集改名不改旧结果。报告固定引用批准运行及其旧版本；CSV含模型参数、转移、后验、点态/路径、模拟参考与回溯前驱。未批准生成被拒绝，重复决定409。
@@ -72,15 +84,15 @@ StateModel修订PATCH递增revision；研究保存完整孔段读数、truth参�
 | 核心数值 | Python math自实现logsumexp、前向后向、Viterbi |
 | 异步与数据库 | Redis7.4 / 独立worker / PostgreSQL16 |
 
-81个代码源文件，src内77个职责文件。backend/src含routes/controllers/services/models/schemas/middlewares/utils/constants/config；frontend/src含api/stores/types/components/common/hooks/pages/router/utils/constants。DDL在backend/migrations，advisory lock保护首次建表。科学数值使用Python float双精度并在PostgreSQL JSON文本载荷无显示舍入往返，日志中的−∞用null编码。配套requirements沿用已测依赖，NumPy不是本项目核心算法依赖。
+81个src职责文件（backend/src 42个Python，frontend/src 39个TS/TSX/CSS），另有backend/tests两个unittest文件覆盖约束数值、冲突诊断与API冒烟。backend/src含routes/controllers/services/models/schemas/middlewares/utils/constants/config；frontend/src含api/stores/types/components/common/hooks/pages/router/utils/constants。DDL在backend/migrations，advisory lock保护首次建表。科学数值使用Python float双精度并在PostgreSQL JSON文本载荷无显示舍入往返，日志中的−∞用null编码。配套requirements沿用已测依赖，NumPy不是本项目核心算法依赖。
 
-Seed固定2409，3孔各160点，配置三态均值/方差与持久转移，含少量模拟测量扰动；truth为模拟生成态，仅参考。SEED_DEMO=true自动seed，失败记日志不阻断，自然键insert-only，重复不新增、不覆盖用户修改。普通SX-01种子两种标签可能完全一致；独立四点反例在验收中明确呈现两种目标差异。
+Seed固定2409，3孔各160点，配置三态均值/方差与持久转移，含少量模拟测量扰动；truth为模拟生成态，仅参考。SEED_DEMO=true自动seed，失败记日志不阻断，自然键insert-only，重复不新增、不覆盖用户修改。普通SX-01种子两种标签可能完全一致；独立四点反例在验收中明确呈现两种目标差异。Seed另含一条三深度允许状态的可满足约束研究（含来源运行溯源）与一条零转移锁定链冲突研究，后者运行failed且不可提审，用于演示无法连通孔段诊断。
 
 环境DATABASE_URL、REDIS_URL、JWT_SECRET、SEED_DEMO、TASK_MODE、ARTIFACT_DIR与端口/DB_PASSWORD见.env.example。本地配置PG/Redis，pip install backend/requirements.txt后uvicorn src.main:app --reload；前端npm ci && npm run dev，经/api反代。package与lock精确复用已测配套版本，仅改根项目名。
 
 枚举：backend/src/constants/enums.py(Role/RunStatus/ReviewStatus)、domain.py(步长/配额/假设)；frontend/src/constants/enums.ts(角色/状态)。通用共享PageTitle/Notice/StatusBadge，业务共享轨迹/模型矩阵，hooks/useResource/useSession、utils/chart/format。
 
-限制：固定一维高斯和齐次转移假设，不拟合参数，模型失配会造成误导。只处理完整1米孔段，不跨孔、不补缺层；后验是给定模型条件概率，不等于真实岩性确认。浮点极端近同发射仍有有限精度；公共offset和相对分数单独保留。Redis出队强杀不自动重投，JSON载荷无多人乐观锁/迁移回滚。所有真实测试、日志和截图仅在批次test-artifacts/gb-2409。
+限制：固定一维高斯和齐次转移假设，不拟合参数，模型失配会造成误导。只处理完整1米孔段，不跨孔、不补缺层；后验是给定模型条件概率，不等于真实岩性确认。深度允许状态是人工复核证据而非观测数据，约束只重分配概率质量、不改变模型参数；约束过严或与零转移冲突时整孔无可行路径，只能放宽规则或新建研究。浮点极端近同发射仍有有限精度；公共offset和相对分数单独保留。Redis出队强杀不自动重投，JSON载荷无多人乐观锁/迁移回滚。所有真实测试、日志和截图仅在批次test-artifacts/gb-2409。
 
 ## License
 

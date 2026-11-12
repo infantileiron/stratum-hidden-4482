@@ -24,6 +24,8 @@ class SequenceStudy:
  snapshot:dict
  checksum:str
  created_at:str=''
+ depth_constraint_count:int=0
+ constraint_source_run_id:str=''
 @dataclass
 class DecodeRun:
  id:str

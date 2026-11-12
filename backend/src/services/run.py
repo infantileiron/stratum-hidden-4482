@@ -2,6 +2,7 @@ from src.models.entities import DecodeRun
 from src.utils import repository as repo
 from src.utils.identity import new_id, now
 from src.services.statistics import analyze
+from src.services.constraints import ConstraintConflict
 from src.config.settings import TASK_MODE, REDIS_URL, ARTIFACT_DIR
 import json
 def list_runs(): return repo.all_rows("runs")
@@ -15,8 +16,10 @@ def execute(id):
         ARTIFACT_DIR.mkdir(parents=True,exist_ok=True)
         (ARTIFACT_DIR / (id+".json")).write_text(json.dumps(run["result"],ensure_ascii=False))
         run["status"]="completed"
+    except ConstraintConflict as exc:
+        run["status"]="failed"; run["error"]=str(exc); run["result"]={"constraint_conflict":exc.payload}
     except Exception as exc:
-        run["status"]="failed"; run["error"]=str(exc)
+        run["status"]="failed"; run["error"]=str(exc); run["result"]={}
     return repo.put("runs",run)
 def create(data):
     repo.get("studies",data.study_id)
